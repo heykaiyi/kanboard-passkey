@@ -1,0 +1,66 @@
+/*!
+ * Passkeys for Kanboard.
+ *
+ * Deliberately small: everything below either positions something Kanboard has
+ * no class for, or states a colour that has to survive a theme. Buttons reuse
+ * .btn so a restyled install restyles these too.
+ */
+
+/* The list inside is lifted out by the script and the div is left holding
+ * only the configuration, so it takes no room of its own. */
+.passkey-signin:empty,
+.passkey-signin:not(:has(*)) {
+    display: none;
+}
+
+/* Nothing here paints the button. It is rendered as a link in a .no-bullet
+ * list, exactly like the one an OAuth plugin adds, so whichever stylesheet
+ * draws that row draws this too — a plain link in stock Kanboard, a
+ * borderless secondary button under a theme that restyles the login page. The
+ * two rules below only say what that row cannot know: the icon spacing, and
+ * that a ceremony is running. */
+.passkey-button .fa {
+    margin-right: 4px;
+}
+
+.passkey-button.is-busy {
+    opacity: 0.65;
+    cursor: default;
+}
+
+.passkey-error {
+    margin: 8px 0 0 0;
+    color: #b94a48;
+    font-size: 0.9em;
+}
+
+/* A theme that tokenises its palette gets the token; everything else keeps
+ * the literal above. */
+.passkey-error {
+    color: var(--destructive, #b94a48);
+}
+
+.passkey-register {
+    margin-top: 20px;
+}
+
+.passkey-register input[type="text"] {
+    max-width: 320px;
+}
+
+/* One row per passkey, so the name stays editable without a second page. */
+.passkey-rename {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    margin: 0;
+}
+
+.passkey-rename input[type="text"] {
+    margin: 0;
+    min-width: 0;
+}
+
+.passkey-rename .btn {
+    white-space: nowrap;
+}
