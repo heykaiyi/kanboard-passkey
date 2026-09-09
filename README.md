@@ -93,6 +93,25 @@ back is **Set up a one-time code instead**, which is Kanboard's own screen,
 untouched. Removing your last passkey turns the second factor off rather than
 locking you out.
 
+#### When it is not asked for
+
+Kanboard exempts one way in from the second factor — a "remember me" session —
+by naming it. Once the second factor is a passkey, two more belong on that
+list, and neither is asked:
+
+- **Signing in with a passkey.** One unlocked with a fingerprint, face or PIN
+  is already two factors; a second passkey on top proves nothing new. Lower
+  **user verification** to *preferred* and it proves possession only, so the
+  prompt comes back.
+- **Signing in through Google, or any other OAuth provider.** That provider has
+  already authenticated the person against an account carrying its own second
+  factor. The test is the provider's interface rather than its name, so every
+  OAuth plugin counts and none has to be listed here.
+
+Both apply only to users whose second factor is a passkey. Anyone on a one-time
+code stays on Kanboard's own path — installing this plugin is not a reason for
+their login to start behaving differently.
+
 ---
 
 ## Settings

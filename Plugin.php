@@ -4,9 +4,11 @@ namespace Kanboard\Plugin\Passkey;
 
 use Kanboard\Core\Plugin\Base;
 use Kanboard\Core\Security\AuthenticationManager;
+use Kanboard\Core\Security\OAuthAuthenticationProviderInterface;
 use Kanboard\Core\Security\Role;
 use Kanboard\Core\Translator;
 use Kanboard\Event\AuthSuccessEvent;
+use LogicException;
 use Kanboard\Plugin\Passkey\Auth\PasskeyAuthProvider;
 use Kanboard\Plugin\Passkey\Auth\PasskeyTwoFactorProvider;
 
@@ -90,13 +92,11 @@ class Plugin extends Base
     }
 
     /**
-     * A passkey unlocked with a fingerprint, face or PIN is already two
-     * factors — something you have and something you are. Asking for a
-     * one-time code on top would be theatre, so the post-authentication step
-     * is marked as satisfied, exactly as Kanboard does for RememberMe.
+     * Some ways in have already done what the second factor is there to do.
      *
-     * When user verification is not required, the passkey proves possession
-     * only and the second factor is left to run.
+     * Kanboard exempts exactly one — RememberMe, in AuthSubscriber — by
+     * naming it. Two more belong on that list once the second factor is a
+     * passkey, and both are decided in isSecondFactorAlreadySatisfied().
      *
      * @param AuthSuccessEvent $event
      */
@@ -112,9 +112,49 @@ class Plugin extends Base
         session_remove(PasskeyTwoFactorProvider::SESSION_OPTIONS);
         session_remove('twoFactorBeforeCodeCalled');
 
-        if ($event->getAuthType() === PasskeyAuthProvider::NAME && $this->passkeySettingsModel->isUserVerificationRequired()) {
+        if ($this->isSecondFactorAlreadySatisfied($event->getAuthType())) {
             $this->userSession->setPostAuthenticationAsValidated();
         }
+    }
+
+    /**
+     * Whether the way this user just signed in already carries a second
+     * factor, making the prompt a formality to type through.
+     *
+     * Scoped to users whose second factor is a passkey. A user on a one-time
+     * code is on Kanboard's own path, and installing this plugin is not a
+     * reason for their login to start behaving differently.
+     *
+     * @param  string $authType
+     * @return bool
+     */
+    private function isSecondFactorAlreadySatisfied($authType)
+    {
+        // A passkey unlocked with a fingerprint, face or PIN is already two
+        // factors — something you have and something you are. Asking for a
+        // second passkey on top would be theatre. Lower user verification to
+        // "preferred" and it proves possession only, so the prompt stands.
+        if ($authType === PasskeyAuthProvider::NAME) {
+            return $this->passkeySettingsModel->isUserVerificationRequired();
+        }
+
+        $userId = $this->userSession->getId();
+
+        if ($userId <= 0 || ! $this->passkeySettingsModel->isTwoFactorPasskey($userId)) {
+            return false;
+        }
+
+        // Signing in through Google or any other OAuth provider means that
+        // provider has already authenticated this person against an account
+        // that carries its own second factor. Asked by interface rather than
+        // by name, so every OAuth plugin counts and none has to be listed.
+        try {
+            $provider = $this->authenticationManager->getProvider($authType);
+        } catch (LogicException $e) {
+            return false;
+        }
+
+        return $provider instanceof OAuthAuthenticationProviderInterface;
     }
 
     public function onStartup()
@@ -149,7 +189,7 @@ class Plugin extends Base
 
     public function getPluginVersion()
     {
-        return '0.1.2';
+        return '0.1.3';
     }
 
     public function getPluginHomepage()

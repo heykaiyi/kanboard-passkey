@@ -33,6 +33,43 @@ $_SERVER['REQUEST_URI'] = '/';
 require $root.'/app/common.php';
 require_once __DIR__.'/VirtualAuthenticator.php';
 
+/**
+ * A minimal OAuth provider, so the exemption can be tested by the interface
+ * it actually keys off rather than by hoping GoogleAuth is installed.
+ */
+class PasskeyTestOAuthProvider extends Kanboard\Core\Base implements Kanboard\Core\Security\OAuthAuthenticationProviderInterface
+{
+    public function getName()
+    {
+        return 'PasskeyTestOAuth';
+    }
+
+    public function authenticate()
+    {
+        return false;
+    }
+
+    public function getUser()
+    {
+        return null;
+    }
+
+    public function unlink($userId)
+    {
+        return false;
+    }
+
+    public function getService()
+    {
+        return null;
+    }
+
+    public function setCode($code)
+    {
+        return $this;
+    }
+}
+
 $passed = 0;
 $failed = array();
 $userId = null;
@@ -269,6 +306,96 @@ try {
         $row = $credentials->getByCredentialId($stored['credential_id']);
         assertTrue((int) $row['last_used_at'] > 0, 'last_used_at was never written');
         assertTrue((int) $row['sign_count'] > 0, 'the signature counter was not advanced');
+    });
+
+    echo "\nWays in that already carry a second factor\n";
+
+    test('lets a passkey sign-in through without a second prompt', function () use ($container, $settings, $userId) {
+        halfSignIn($userId);
+        $settings->setTwoFactorPasskey($userId, true);
+        session_set('postAuthenticationValidated', false);
+
+        $plugin = new Kanboard\Plugin\Passkey\Plugin($container);
+        $plugin->onLoginSuccess(new Kanboard\Event\AuthSuccessEvent(
+            Kanboard\Plugin\Passkey\Auth\PasskeyAuthProvider::NAME
+        ));
+
+        assertTrue($container['userSession']->isPostAuthenticationValidated(), 'a passkey login was asked for a passkey again');
+    });
+
+    test('still prompts a passkey sign-in that only proved possession', function () use ($container, $settings, $userId) {
+        // user verification "preferred": a bare tap, so one factor.
+        $previous = $container['configModel']->get('passkey_user_verification', 'required');
+        $container['configModel']->save(array('passkey_user_verification' => 'preferred'));
+
+        // ConfigModel::get() reads through a per-request memory cache, so a
+        // setting saved inside one process is not visible to it until the
+        // cache is dropped. The web app gets a fresh one per request.
+        $container['memoryCache']->flush();
+
+        halfSignIn($userId);
+        $settings->setTwoFactorPasskey($userId, true);
+        session_set('postAuthenticationValidated', false);
+
+        $plugin = new Kanboard\Plugin\Passkey\Plugin($container);
+        $plugin->onLoginSuccess(new Kanboard\Event\AuthSuccessEvent(
+            Kanboard\Plugin\Passkey\Auth\PasskeyAuthProvider::NAME
+        ));
+
+        $validated = $container['userSession']->isPostAuthenticationValidated();
+        $container['configModel']->save(array('passkey_user_verification' => $previous));
+        $container['memoryCache']->flush();
+
+        assertFalse($validated, 'an unverified passkey was treated as two factors');
+    });
+
+    test('lets a social sign-in through without a second prompt', function () use ($container, $settings, $userId) {
+        // Registered as a stand-in for Google, so the test says what it means
+        // and does not need an OAuth plugin installed to run.
+        $container['authenticationManager']->register(new PasskeyTestOAuthProvider($container));
+
+        halfSignIn($userId);
+        $settings->setTwoFactorPasskey($userId, true);
+        session_set('postAuthenticationValidated', false);
+
+        $plugin = new Kanboard\Plugin\Passkey\Plugin($container);
+        $plugin->onLoginSuccess(new Kanboard\Event\AuthSuccessEvent('PasskeyTestOAuth'));
+
+        assertTrue($container['userSession']->isPostAuthenticationValidated(), 'an OAuth login was asked for a passkey');
+    });
+
+    test('still prompts a password sign-in', function () use ($container, $settings, $userId) {
+        halfSignIn($userId);
+        $settings->setTwoFactorPasskey($userId, true);
+        session_set('postAuthenticationValidated', false);
+
+        $plugin = new Kanboard\Plugin\Passkey\Plugin($container);
+        $plugin->onLoginSuccess(new Kanboard\Event\AuthSuccessEvent('Database'));
+
+        assertFalse($container['userSession']->isPostAuthenticationValidated(), 'a password login skipped the second factor');
+    });
+
+    test('leaves a one-time-code user on Kanboard\'s own path', function () use ($container, $settings, $userId) {
+        // The same OAuth login, for a user who did not choose a passkey.
+        halfSignIn($userId);
+        $settings->setTwoFactorPasskey($userId, false);
+        session_set('postAuthenticationValidated', false);
+
+        $plugin = new Kanboard\Plugin\Passkey\Plugin($container);
+        $plugin->onLoginSuccess(new Kanboard\Event\AuthSuccessEvent('PasskeyTestOAuth'));
+
+        assertFalse($container['userSession']->isPostAuthenticationValidated(), 'a TOTP user\'s login was changed by this plugin');
+    });
+
+    test('ignores an authentication type no provider answers to', function () use ($container, $settings, $userId) {
+        halfSignIn($userId);
+        $settings->setTwoFactorPasskey($userId, true);
+        session_set('postAuthenticationValidated', false);
+
+        $plugin = new Kanboard\Plugin\Passkey\Plugin($container);
+        $plugin->onLoginSuccess(new Kanboard\Event\AuthSuccessEvent('NoSuchProvider'));
+
+        assertFalse($container['userSession']->isPostAuthenticationValidated(), 'an unknown auth type was let through');
     });
 
     echo "\nSecond factor: one-time code, on the same provider\n";
