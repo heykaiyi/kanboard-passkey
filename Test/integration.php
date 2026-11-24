@@ -117,6 +117,7 @@ function halfSignIn($userId)
         'username' => $user['username'],
         'role' => $user['role'],
         'twofactor_activated' => true,
+        'language' => $user['language'],
     ));
 }
 
@@ -270,6 +271,50 @@ try {
 
         assertTrue($provider->authenticate(), 'a valid assertion was rejected');
         assertFalse(session_exists(PasskeyTwoFactorProvider::SESSION_REDIRECT), 'the destination outlived the second factor');
+    });
+
+    test('does not ask for the passkey again after the user changes their own account', function () use ($container, $userId) {
+        halfSignIn($userId);
+        $container['userSession']->setPostAuthenticationAsValidated();
+        $plugin = new Kanboard\Plugin\Passkey\Plugin($container);
+        $plugin->onStartup();
+
+        // What UserApiAccessController::generate() does.
+        $container['userModel']->update(array('id' => $userId, 'api_access_token' => Kanboard\Core\Security\Token::getToken()));
+        assertFalse($container['userSession']->isPostAuthenticationValidated(), 'core no longer resets the second factor on refresh; this workaround can go');
+
+        $plugin->onStartup();
+        assertTrue($container['userSession']->isPostAuthenticationValidated(), 'the user was sent back to the second-factor prompt');
+    });
+
+    test('still asks a login that has not passed the second factor', function () use ($container, $userId) {
+        halfSignIn($userId);
+        $plugin = new Kanboard\Plugin\Passkey\Plugin($container);
+        $plugin->onStartup();
+
+        assertFalse($container['userSession']->isPostAuthenticationValidated(), 'a pending second factor was waved through');
+    });
+
+    test('does not carry a passed second factor into a new login', function () use ($container, $userId) {
+        halfSignIn($userId);
+        $container['userSession']->setPostAuthenticationAsValidated();
+        $plugin = new Kanboard\Plugin\Passkey\Plugin($container);
+        $plugin->onStartup();
+
+        session_set('postAuthenticationValidated', false);
+        $plugin->onLoginSuccess(new Kanboard\Event\AuthSuccessEvent('Database'));
+        $plugin->onStartup();
+
+        assertFalse($container['userSession']->isPostAuthenticationValidated(), 'a password login skipped the second factor');
+    });
+
+    test('does not carry a passed second factor over to another user', function () use ($container, $userId) {
+        halfSignIn($userId);
+        session_set(Kanboard\Plugin\Passkey\Plugin::SESSION_SECOND_FACTOR_PASSED, $userId + 1000);
+        $plugin = new Kanboard\Plugin\Passkey\Plugin($container);
+        $plugin->onStartup();
+
+        assertFalse($container['userSession']->isPostAuthenticationValidated(), 'another user\'s pass was honoured');
     });
 
     test('tells the prompt where a failed check is sent, so success can be told apart', function () use ($container) {
@@ -428,6 +473,19 @@ try {
         $plugin->onLoginSuccess(new Kanboard\Event\AuthSuccessEvent('PasskeyTestOAuth'));
 
         assertFalse($container['userSession']->isPostAuthenticationValidated(), 'a TOTP user\'s login was changed by this plugin');
+    });
+
+    test('leaves a one-time-code user\'s profile changes to Kanboard as well', function () use ($container, $settings, $userId) {
+        halfSignIn($userId);
+        $settings->setTwoFactorPasskey($userId, false);
+        $container['userSession']->setPostAuthenticationAsValidated();
+        $plugin = new Kanboard\Plugin\Passkey\Plugin($container);
+        $plugin->onStartup();
+
+        $container['userModel']->update(array('id' => $userId, 'name' => 'Passkey integration test'));
+        $plugin->onStartup();
+
+        assertFalse($container['userSession']->isPostAuthenticationValidated(), 'a TOTP user\'s session was changed by this plugin');
     });
 
     test('ignores an authentication type no provider answers to', function () use ($container, $settings, $userId) {

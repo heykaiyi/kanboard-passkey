@@ -31,6 +31,8 @@ use Kanboard\Plugin\Passkey\Auth\PasskeyTwoFactorProvider;
  */
 class Plugin extends Base
 {
+    const SESSION_SECOND_FACTOR_PASSED = 'passkeySecondFactorPassedFor';
+
     public function initialize()
     {
         // The provider that opens the session once an assertion checks out.
@@ -112,6 +114,9 @@ class Plugin extends Base
         session_remove(PasskeyTwoFactorProvider::SESSION_OPTIONS);
         session_remove('twoFactorBeforeCodeCalled');
 
+        // A new login starts unproven, whoever held this session before.
+        session_remove(self::SESSION_SECOND_FACTOR_PASSED);
+
         $this->rememberWhereToGoAfterSecondFactor();
 
         if ($this->isSecondFactorAlreadySatisfied($event->getAuthType())) {
@@ -183,6 +188,49 @@ class Plugin extends Base
     public function onStartup()
     {
         Translator::load($this->languageModel->getCurrentLanguage(), __DIR__.'/Locale');
+
+        $this->keepSecondFactorAcrossProfileChanges();
+    }
+
+    /**
+     * Do not ask for the passkey again because the user changed their own
+     * account.
+     *
+     * Every UserModel::update() of the signed-in user — generating an API
+     * token, editing the profile, changing the language — calls
+     * UserSession::refresh(), which re-runs initialize() and with it resets
+     * postAuthenticationValidated to false. The next request then lands on
+     * the second-factor prompt in the middle of an ordinary session, and
+     * dismissing the passkey sheet there leaves the user on a page that looks
+     * exactly like being signed out.
+     *
+     * This runs on app.bootstrap — after the session is open, before
+     * PostAuthenticationMiddleware. A session that has passed the second
+     * factor is marked with the user it passed for; when that same user turns
+     * up unvalidated in that same session, it was a refresh and not a login,
+     * so the validation is put back. A login clears the mark first (see
+     * onLoginSuccess), and a logout destroys the session that holds it.
+     *
+     * Scoped to users whose second factor is a passkey, like the rest of the
+     * plugin's changes to how a login behaves.
+     */
+    private function keepSecondFactorAcrossProfileChanges()
+    {
+        if (! $this->userSession->hasPostAuthentication()) {
+            return;
+        }
+
+        $userId = $this->userSession->getId();
+
+        if ($this->userSession->isPostAuthenticationValidated()) {
+            session_set(self::SESSION_SECOND_FACTOR_PASSED, $userId);
+            return;
+        }
+
+        if ((int) session_get(self::SESSION_SECOND_FACTOR_PASSED) === $userId
+            && $this->passkeySettingsModel->isTwoFactorPasskey($userId)) {
+            $this->userSession->setPostAuthenticationAsValidated();
+        }
     }
 
     public function getClasses()
@@ -212,7 +260,7 @@ class Plugin extends Base
 
     public function getPluginVersion()
     {
-        return '0.1.4';
+        return '0.1.5';
     }
 
     public function getPluginHomepage()
