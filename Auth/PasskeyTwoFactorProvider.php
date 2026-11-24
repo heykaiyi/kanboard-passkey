@@ -28,6 +28,7 @@ class PasskeyTwoFactorProvider extends Base implements PostAuthenticationProvide
 {
     const SESSION_CHALLENGE = 'passkeyTwoFactorChallenge';
     const SESSION_OPTIONS = 'passkeyTwoFactorOptions';
+    const SESSION_REDIRECT = 'passkeyRedirectAfterLogin';
 
     /**
      * @var TotpAuth|null
@@ -143,6 +144,10 @@ class PasskeyTwoFactorProvider extends Base implements PostAuthenticationProvide
 
         $this->passkeyCredentialModel->markAsUsed($credential['id'], $signCount);
         $this->resetChallenge();
+
+        // The prompt already gave the destination to the browser; it is used
+        // up once the second factor is.
+        session_remove(self::SESSION_REDIRECT);
     }
 
     /**

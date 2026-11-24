@@ -234,6 +234,49 @@ try {
         assertTrue($provider->authenticate(), 'a valid assertion was rejected');
     });
 
+    test('keeps the page a login was heading for, for the second-factor prompt', function () use ($container, $userId) {
+        halfSignIn($userId);
+        session_set('redirectAfterLogin', '/board/7?filter=status:open');
+
+        $plugin = new Kanboard\Plugin\Passkey\Plugin($container);
+        $plugin->onLoginSuccess(new Kanboard\Event\AuthSuccessEvent('Database'));
+
+        // What core's AuthController::check() does next.
+        session_remove('redirectAfterLogin');
+
+        $same = $container['helper']->passkey->getTwoFactorRedirect();
+        assertTrue($same === '/board/7?filter=status:open', 'the prompt was given "'.$same.'"');
+    });
+
+    test('does not carry an off-site destination to the prompt', function () use ($container, $userId) {
+        halfSignIn($userId);
+        session_set(PasskeyTwoFactorProvider::SESSION_REDIRECT, '/left/over');
+        session_set('redirectAfterLogin', '//evil.example/');
+
+        $plugin = new Kanboard\Plugin\Passkey\Plugin($container);
+        $plugin->onLoginSuccess(new Kanboard\Event\AuthSuccessEvent('Database'));
+
+        assertFalse(session_exists(PasskeyTwoFactorProvider::SESSION_REDIRECT), 'an unsafe or stale destination survived the login');
+        assertTrue($container['helper']->passkey->getTwoFactorRedirect() === '', 'the prompt was given a destination');
+    });
+
+    test('uses the destination up once the second factor passes', function () use ($container, $authenticator, $origin, $userId) {
+        halfSignIn($userId);
+        session_set(PasskeyTwoFactorProvider::SESSION_REDIRECT, '/board/7');
+
+        $provider = new PasskeyTwoFactorProvider($container);
+        $provider->beforeCode();
+        $provider->setCode(assertionCode($authenticator, $origin));
+
+        assertTrue($provider->authenticate(), 'a valid assertion was rejected');
+        assertFalse(session_exists(PasskeyTwoFactorProvider::SESSION_REDIRECT), 'the destination outlived the second factor');
+    });
+
+    test('tells the prompt where a failed check is sent, so success can be told apart', function () use ($container) {
+        $retry = $container['helper']->passkey->getTwoFactorRetryUrl();
+        assertTrue($retry === $container['helper']->url->to('TwoFactorController', 'code'), 'the retry URL is not the one core redirects to');
+    });
+
     test('narrows the ceremony to that user\'s own passkeys', function () use ($container, $userId, $stored) {
         halfSignIn($userId);
         $provider = new PasskeyTwoFactorProvider($container);

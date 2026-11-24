@@ -106,6 +106,49 @@ class PasskeyHelper extends Base
     }
 
     /**
+     * Where a passkey sign-in should land, rendered into the login page so the
+     * browser knows before the ceremony starts.
+     *
+     * @return string  a same-site path, or '' for the dashboard
+     */
+    public function getLoginRedirect()
+    {
+        return $this->safeRedirect(session_get('redirectAfterLogin'));
+    }
+
+    /**
+     * Where the second-factor prompt should land once it is answered.
+     *
+     * @return string  a same-site path, or '' for wherever core sends it
+     */
+    public function getTwoFactorRedirect()
+    {
+        return $this->safeRedirect(session_get(PasskeyTwoFactorProvider::SESSION_REDIRECT));
+    }
+
+    /**
+     * Where core sends a second factor that did not check out. The prompt
+     * compares against it to tell a failure from a success.
+     *
+     * @return string
+     */
+    public function getTwoFactorRetryUrl()
+    {
+        return $this->helper->url->to('TwoFactorController', 'code');
+    }
+
+    /**
+     * @param  mixed $uri
+     * @return string
+     */
+    private function safeRedirect($uri)
+    {
+        $uri = (string) $uri;
+
+        return $this->request->isSafeRedirectUri($uri) ? $uri : '';
+    }
+
+    /**
      * A CSRF token for the fetch() calls.
      *
      * It goes in a data attribute rather than a hidden input because the

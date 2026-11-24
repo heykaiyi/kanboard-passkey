@@ -27,6 +27,7 @@ if (! $this->passkey->isSignInAvailable()) {
      data-messages="<?= $this->text->e($this->passkey->getMessages()) ?>"
      data-options-url="<?= $this->url->href('PasskeyLoginController', 'options', array('plugin' => 'Passkey')) ?>"
      data-verify-url="<?= $this->url->href('PasskeyLoginController', 'verify', array('plugin' => 'Passkey')) ?>"
+     data-redirect="<?= $this->text->e($this->passkey->getLoginRedirect()) ?>"
      data-csrf="<?= $this->passkey->getCsrfToken() ?>">
     <ul class="no-bullet js-passkey-list">
         <li>

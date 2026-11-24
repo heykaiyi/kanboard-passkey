@@ -23,6 +23,7 @@ use Kanboard\Plugin\Passkey\WebAuthn\WebAuthnException;
 class PasskeyLoginController extends BaseController
 {
     const SESSION_CHALLENGE = 'passkeyLoginChallenge';
+    const SESSION_REDIRECT = 'passkeyLoginRedirect';
 
     /**
      * Issue the options for navigator.credentials.get().
@@ -38,6 +39,20 @@ class PasskeyLoginController extends BaseController
 
         $challenge = Server::createChallenge();
         session_set(self::SESSION_CHALLENGE, base64_encode($challenge));
+
+        // The login page tells us where it was meant to lead before the
+        // ceremony starts, and the answer is pinned to this challenge.
+        // redirectAfterLogin alone is not enough: any request to a protected
+        // page made while the passkey sheet is open — another tab, an image,
+        // a poll — overwrites it, and the sign-in would land there instead.
+        $payload = $this->request->getJson();
+        $target = isset($payload['redirect']) && is_string($payload['redirect']) ? $payload['redirect'] : '';
+
+        if ($this->request->isSafeRedirectUri($target)) {
+            session_set(self::SESSION_REDIRECT, $target);
+        } else {
+            session_remove(self::SESSION_REDIRECT);
+        }
 
         $this->response->json(array(
             'publicKey' => $this->passkeySettingsModel->getServer()->getRequestOptions($challenge),
@@ -58,6 +73,9 @@ class PasskeyLoginController extends BaseController
 
         $challenge = base64_decode((string) session_get(self::SESSION_CHALLENGE), true);
         session_remove(self::SESSION_CHALLENGE);
+
+        $target = (string) session_get(self::SESSION_REDIRECT);
+        session_remove(self::SESSION_REDIRECT);
 
         if ($challenge === false || $challenge === '') {
             $this->response->json(array('error' => t('This sign-in took too long, please try again.')), 400);
@@ -92,6 +110,13 @@ class PasskeyLoginController extends BaseController
             $this->dispatcher->dispatch(new AuthFailureEvent(), AuthenticationManager::EVENT_FAILURE);
             $this->response->json(array('error' => t('This account cannot sign in.')), 403);
             return;
+        }
+
+        // Put the pinned destination back where everything downstream reads
+        // it — getRedirectUrl() below, and the copy Plugin::onLoginSuccess()
+        // keeps for a second-factor prompt that may still be in the way.
+        if ($this->request->isSafeRedirectUri($target)) {
+            session_set('redirectAfterLogin', $target);
         }
 
         $this->dispatcher->dispatch(new AuthSuccessEvent(PasskeyAuthProvider::NAME), AuthenticationManager::EVENT_SUCCESS);

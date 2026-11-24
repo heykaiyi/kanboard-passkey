@@ -196,6 +196,16 @@
 
     var conditionalAbort = null;
 
+    /* The destination travels with the request for a challenge, so it is
+     * settled before the passkey sheet opens and nothing that happens while
+     * it is open can change where the sign-in lands. */
+    function signInOptionsPayload(container, csrf) {
+        return {
+            csrf_token: csrf,
+            redirect: container.getAttribute('data-redirect') || ''
+        };
+    }
+
     function signIn(container, button) {
         var csrf = token(container);
 
@@ -209,7 +219,7 @@
         clearError(container);
         busy(button, container, true);
 
-        post(container.getAttribute('data-options-url'), {csrf_token: csrf})
+        post(container.getAttribute('data-options-url'), signInOptionsPayload(container, csrf))
             .then(function (body) {
                 return navigator.credentials.get({publicKey: requestOptions(body.publicKey)});
             })
@@ -252,7 +262,7 @@
             var csrf = token(container);
             conditionalAbort = new AbortController();
 
-            post(container.getAttribute('data-options-url'), {csrf_token: csrf})
+            post(container.getAttribute('data-options-url'), signInOptionsPayload(container, csrf))
                 .then(function (body) {
                     return navigator.credentials.get({
                         publicKey: requestOptions(body.publicKey),
@@ -311,8 +321,8 @@
     /**
      * The options are rendered into the page rather than fetched, because the
      * challenge was already issued server-side when the prompt was built. The
-     * assertion goes into the form's `code` field and the form is submitted
-     * normally, so the flow stays inside core's TwoFactorController.
+     * assertion goes into the form's `code` field and the form is posted to
+     * core's TwoFactorController, so the check itself stays in core.
      */
     function secondFactor(form, button) {
         var options;
@@ -330,12 +340,51 @@
         navigator.credentials.get({publicKey: requestOptions(options)})
             .then(function (credential) {
                 form.querySelector('.js-passkey-2fa-code').value = JSON.stringify(serialize(credential));
-                form.submit();
+                submitSecondFactor(form);
             })
             .catch(function (error) {
                 busy(button, form, false);
                 showError(form, describe(error, form));
             });
+    }
+
+    /**
+     * Post the answer, then go where the user was heading.
+     *
+     * TwoFactorController::check() always redirects to the dashboard on
+     * success, and the page the user asked for was dropped on the way here,
+     * so a plain submit would land on the dashboard every time. Posted as an
+     * XHR instead, core answers with the redirect in X-Ajax-Redirect rather
+     * than following it; a redirect back to the prompt means the check
+     * failed, and anything else means it passed and the destination the page
+     * was given up front applies.
+     */
+    function submitSecondFactor(form) {
+        var target = form.getAttribute('data-redirect') || '';
+        var retry = form.getAttribute('data-retry-url') || '';
+
+        window.fetch(form.action, {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: {'X-Requested-With': 'XMLHttpRequest'},
+            body: new FormData(form)
+        }).then(function (response) {
+            var next = response.headers.get('X-Ajax-Redirect') || '';
+
+            if (!response.ok || next === '') {
+                throw new Error('HTTP ' + response.status);
+            }
+
+            if (next !== retry && target !== '') {
+                next = target;
+            }
+
+            window.location.href = next;
+        }).catch(function () {
+            // Whatever went wrong, the server still has the final say on the
+            // code page; reload it rather than leave the user on a spinner.
+            window.location.href = retry || window.location.href;
+        });
     }
 
     // -- wiring --------------------------------------------------------------

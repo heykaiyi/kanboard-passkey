@@ -22,6 +22,8 @@ $passkeyOptions = $this->passkey->getTwoFactorOptions();
         <form method="post" class="js-passkey-2fa-form"
               action="<?= $this->url->href('TwoFactorController', 'check', array('user_id' => $this->user->getId())) ?>"
               data-options="<?= $this->text->e($passkeyOptions) ?>"
+              data-redirect="<?= $this->text->e($this->passkey->getTwoFactorRedirect()) ?>"
+              data-retry-url="<?= $this->text->e($this->passkey->getTwoFactorRetryUrl()) ?>"
               data-messages="<?= $this->text->e($this->passkey->getMessages()) ?>">
             <?= $this->form->csrf() ?>
             <input type="hidden" name="code" class="js-passkey-2fa-code" value="">

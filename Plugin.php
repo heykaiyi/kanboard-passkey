@@ -112,8 +112,31 @@ class Plugin extends Base
         session_remove(PasskeyTwoFactorProvider::SESSION_OPTIONS);
         session_remove('twoFactorBeforeCodeCalled');
 
+        $this->rememberWhereToGoAfterSecondFactor();
+
         if ($this->isSecondFactorAlreadySatisfied($event->getAuthType())) {
             $this->userSession->setPostAuthenticationAsValidated();
+        }
+    }
+
+    /**
+     * Keep the page the user was heading for, past the second factor.
+     *
+     * This runs inside the login, before the controller that handled it reads
+     * redirectAfterLogin. That controller then deletes it and redirects, and
+     * PostAuthenticationMiddleware turns the redirect into the second-factor
+     * prompt — so by the time the prompt is answered the destination is gone,
+     * and TwoFactorController::check() sends everyone to the dashboard. The
+     * copy taken here is what the prompt hands to the browser up front.
+     */
+    private function rememberWhereToGoAfterSecondFactor()
+    {
+        $target = (string) session_get('redirectAfterLogin');
+
+        if ($this->request->isSafeRedirectUri($target)) {
+            session_set(PasskeyTwoFactorProvider::SESSION_REDIRECT, $target);
+        } else {
+            session_remove(PasskeyTwoFactorProvider::SESSION_REDIRECT);
         }
     }
 
@@ -189,7 +212,7 @@ class Plugin extends Base
 
     public function getPluginVersion()
     {
-        return '0.1.3';
+        return '0.1.4';
     }
 
     public function getPluginHomepage()
